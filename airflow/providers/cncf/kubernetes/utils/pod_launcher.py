@@ -26,6 +26,7 @@ import tenacity
 from kubernetes import client, watch
 from kubernetes.client.models.v1_pod import V1Pod
 from kubernetes.client.rest import ApiException
+from airflow.kubernetes.istio import Istio
 from kubernetes.stream import stream as kubernetes_stream
 from pendulum import Date, DateTime, Duration, Time
 from pendulum.parsing.exceptions import ParserError
@@ -55,6 +56,19 @@ class PodStatus:
     SUCCEEDED = 'succeeded'
 
 
+class SleepConfig:
+    """Configure sleeps used for polling"""
+    # Only polls during the start of a pod
+    POD_STARTING_POLL = 1
+    # Used to detect all cleanup jobs are completed
+    # and the entire Pod is cleaned up
+    POD_RUNNING_POLL = 1
+    # Polls for the duration of the task execution
+    # to detect when the task is done. The difference
+    # between this and POD_RUNNING_POLL is sidecars.
+    BASE_CONTAINER_RUNNING_POLL = 2
+
+
 class PodLauncher(LoggingMixin):
     """Launches PODS"""
 
@@ -77,6 +91,7 @@ class PodLauncher(LoggingMixin):
         self._client = kube_client or get_kube_client(in_cluster=in_cluster, cluster_context=cluster_context)
         self._watch = watch.Watch()
         self.extract_xcom = extract_xcom
+        self.istio = Istio(self._client)
 
     def run_pod_async(self, pod: V1Pod, **kwargs):
         """Runs POD asynchronously"""
@@ -174,13 +189,14 @@ class PodLauncher(LoggingMixin):
         if self.extract_xcom:
             while self.base_container_is_running(pod):
                 self.log.info('Container %s has state %s', pod.metadata.name, State.RUNNING)
-                time.sleep(2)
+                time.sleep(SleepConfig.BASE_CONTAINER_RUNNING_POLL)
             result = self._extract_xcom(pod)
             self.log.info(result)
             result = json.loads(result)
+        self.istio.handle_istio_proxy(self.read_pod(pod))
         while self.pod_is_running(pod):
             self.log.info('Pod %s has state %s', pod.metadata.name, State.RUNNING)
-            time.sleep(2)
+            time.sleep(SleepConfig.POD_RUNNING_POLL)
         remote_pod = self.read_pod(pod)
         return self._task_status(remote_pod), remote_pod, result
 
