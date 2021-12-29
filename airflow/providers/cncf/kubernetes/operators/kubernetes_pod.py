@@ -318,7 +318,10 @@ class KubernetesPodOperator(BaseOperator):
         # Ensure that label is valid for Kube,
         # and if not truncate/remove invalid chars and replace with short hash.
         for label_id, label in labels.items():
-            safe_label = pod_generator.make_safe_label_value(str(label))
+            if label_id == 'execution_date':
+                safe_label = re.sub(r"[:+]", "_", str(label))
+            else:
+                safe_label = pod_generator.make_safe_label_value(str(label))
             labels[label_id] = safe_label
         return labels
 
@@ -349,6 +352,23 @@ class KubernetesPodOperator(BaseOperator):
             label_selector = self._get_pod_identifying_label_string(labels)
 
             pod_list = self.client.list_namespaced_pod(self.namespace, label_selector=label_selector)
+                        # Check if the pod's 'base' container is running
+            pod_list_filtered = []
+            for pod in pod_list.items:
+
+                if pod.status.start_time is None:
+                    # Pod is still starting up, it should be considered
+                    pod_list_filtered.append(pod)
+                    continue
+
+                for container in pod.status.container_statuses:
+                    if container.name == 'base' and container.state.running is not None:
+                        pod_list_filtered.append(pod)
+                        break
+
+                response = client.read_namespaced_pod(pod.metadata.name, pod.metadata.namespace)
+
+            pod_list = sorted(pod_list_filtered)
 
             if len(pod_list.items) > 1 and self.reattach_on_restart:
                 raise AirflowException(
