@@ -443,10 +443,12 @@ class KubernetesPodOperator(BaseOperator):
             if self.pod_template_file or self.full_pod_spec:
                 return None
             raise AirflowException("`name` is required unless `pod_template_file` or `full_pod_spec` is set")
-
-        validate_key(name, max_length=220)
+        # Restrict the name to 30 chars. The pod generation will also add on 
+        # -<32 chars> and the max name length is 63
+        name = pod_generator.make_safe_label_value(name, max_length=30)
+        validate_key(name, max_length=30)
         return re.sub(r'[^a-z0-9.-]+', '-', name.lower())
-
+      
     def create_pod_request_obj(self) -> k8s.V1Pod:
         """
         Creates a V1Pod based on user parameters. Note that a `pod` or `pod_template_file`
