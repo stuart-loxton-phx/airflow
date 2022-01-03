@@ -40,7 +40,7 @@ from airflow.utils import yaml
 from airflow.version import version as airflow_version
 
 MAX_LABEL_LEN = 63
-MAX_LABEL_LEN = 253
+
 
 def make_safe_label_value(string, max_length=MAX_LABEL_LEN):
     """
